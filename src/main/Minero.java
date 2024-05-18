@@ -90,6 +90,9 @@ public class Minero extends AugmentedRobot implements Directions {
     private static Semaphore semRob;
 	private static FileWriter fwStatic;
 	private static Semaphore semStatic;
+	private static Semaphore semEstado;
+	private static FileWriter fwEstado;
+	private static int estado;
 
 	// Constructor for Minero class. Extends the AugmentedRobot and adds two
 	// parameters:
@@ -116,7 +119,9 @@ public class Minero extends AugmentedRobot implements Directions {
 
 	// Runnable method that starts the thread
 	public void run() {
+		cambiarEstado(1);
 		ejecutarMina();
+		cambiarEstado(0);
 	}
 
 	// Determine move direction on the Street
@@ -1049,6 +1054,21 @@ public class Minero extends AugmentedRobot implements Directions {
 			System.out.println("Debug Habilitado.");
 	}
 
+	private static void cambiarEstado(int nuevo_estado) {
+		try {
+			semEstado.acquire();
+			if (nuevo_estado == estado) return;
+			Date date = new Date();
+			estado = nuevo_estado;
+			fwEstado.append(String.format("\n%s,%d", dateFormat.format(date), nuevo_estado));
+			fwEstado.flush();
+		} catch (IOException | InterruptedException e) {
+			e.printStackTrace();
+		} finally {
+			semEstado.release();
+		}
+	}
+
 	// Setup global variables
 	private static void asignarVariablesEstaticas() {
 		// Setup warehouses
@@ -1076,6 +1096,8 @@ public class Minero extends AugmentedRobot implements Directions {
             semRob = new Semaphore(1);
 			fwStatic = new FileWriter("data/variables-estaticas.csv", true);
 			semStatic = new Semaphore(1);
+			fwEstado = new FileWriter("data/estado-programa.csv", true);
+			semEstado = new Semaphore(1);
         } catch (IOException e) {
             e.printStackTrace();
         }
