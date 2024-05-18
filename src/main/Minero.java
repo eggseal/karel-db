@@ -1,11 +1,16 @@
 import kareltherobot.*;
 import java.awt.Color;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.concurrent.Semaphore;
 import java.util.Hashtable;
+import java.util.List;
 
 //public class Minero extends Robot implements Directions
 public class Minero extends AugmentedRobot implements Directions {
@@ -17,6 +22,7 @@ public class Minero extends AugmentedRobot implements Directions {
 	private int avenidaActual;
 	private int calleActual;
 	private int id;
+	private boolean encendido;
 	private int beepers;
 	// Constants
 	private static final int AVENIDA_ESPERA_EXT = 3;
@@ -39,6 +45,7 @@ public class Minero extends AugmentedRobot implements Directions {
 	private static final int VETA_CALLE = 11;
 	private static final int VETA_ESPERA_AVENIDA = 14;
 	private static final int VETA_ESPERA_CALLE = 10;
+	private static final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss:SSSS");
 	// Static common robot data for the specific problem
 	// Robot arrayList
 	private static ArrayList<Object> objRobots;
@@ -46,7 +53,7 @@ public class Minero extends AugmentedRobot implements Directions {
 	private static ArrayList<Thread> objThreads;
 	// Booleans to control behaviors
 	private static boolean minaVacia = false;
-	private static boolean debugHabilitado = true;
+	private static boolean debugHabilitado = false;
 	private static boolean ejecutarLog = false;
 	private static boolean encontroVeta = false;
 	private static boolean extraccionCompleta = false;
@@ -76,9 +83,13 @@ public class Minero extends AugmentedRobot implements Directions {
 	private static Semaphore sem_trenInicioProceso;
 	private static Semaphore sem_trenSalida;
 
-	static FileWriter fwLog;
-	static Semaphore semLog;
-	static int ids;
+    private static FileWriter fwLog;
+    private static Semaphore semLog;
+    private static int ids;
+    private static FileWriter fwRob;
+    private static Semaphore semRob;
+	private static FileWriter fwStatic;
+	private static Semaphore semStatic;
 
 	// Constructor for Minero class. Extends the AugmentedRobot and adds two
 	// parameters:
@@ -88,12 +99,14 @@ public class Minero extends AugmentedRobot implements Directions {
 	public Minero(int street, int avenue, Direction direction, int beeps, Color color, int tipo, int id) {
 		// Invokes the parent and fill attributes
 		super(street, avenue, direction, beeps, color);
-		avenidaInicial = avenue;
-		calleInicial = street;
-		avenidaActual = avenue;
-		calleActual = street;
-		tipoRobot = tipo;
-		this.id = id;
+        this.id = ids;
+        this.tipoRobot = tipo;
+        this.encendido = true;
+        this.avenidaInicial = avenue;
+        this.calleInicial = street;
+        this.avenidaActual = avenue;
+        this.calleActual = street;
+        registrarRobot();
 		// Register the current position and locks it indicating that is occupied.
 		String posicion = Integer.toString(calleActual) + " - " + Integer.toString(avenidaActual);
 		objPosiciones.ocuparPosicion(posicion);
@@ -132,12 +145,13 @@ public class Minero extends AugmentedRobot implements Directions {
 
 	@Override
 	public void move() {
-		Date date = new Date();
-		int nuevaCalle = determineNuevaCalle();
-		int nuevaAvenida = determineNuevaAvenida();
 		try {
 			semLog.acquire();
-			fwLog.append(String.format("\n%d,%d,%d,%d,%d", date.getTime(), this.id, nuevaAvenida, nuevaCalle, this.beepers));
+
+			Date date = new Date();
+			int nuevaCalle = determineNuevaCalle();
+			int nuevaAvenida = determineNuevaAvenida();
+			fwLog.append(String.format("\n%s,%d,%d,%d,%d", dateFormat.format(date), this.id, nuevaAvenida, nuevaCalle, this.beepers));
 			fwLog.flush();
 		} catch (IOException e) {
 			System.out.println(e.toString());
@@ -147,14 +161,52 @@ public class Minero extends AugmentedRobot implements Directions {
 			semLog.release();
 			super.move();
 		}
+
+		try {
+            semRob.acquire();
+
+            // Leer todo el archivo y almacenar en memoria
+            List<String> lines = new ArrayList<>();
+            BufferedReader reader = new BufferedReader(new FileReader("data/robot.csv"));
+            String line = reader.readLine(); // Leer la primera línea de encabezado
+            if (line != null) {
+                lines.add(line); // Agregar la línea de encabezado a la lista de líneas
+            }
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length > 1 && Integer.parseInt(parts[1]) == this.id) {
+                    // Actualizar la línea correspondiente al robot
+                    line = String.format("%d,%d,%b,%d,%d,%d,%d",
+                                         tipoRobot, id, encendido,
+                                         avenidaInicial, calleInicial,
+                                         avenidaActual, calleActual);
+                }
+                lines.add(line);
+            }
+            reader.close();
+
+            // Escribir de nuevo el archivo actualizado
+            fwRob = new FileWriter("data/robot.csv", false); // Sobrescribir el archivo
+            BufferedWriter writer = new BufferedWriter(fwRob);
+            for (String l : lines) {
+                writer.write(l);
+                writer.newLine();
+            }
+            writer.flush();
+            writer.close();
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            semRob.release();
+        }
 	}
 
 	@Override
 	public void pickBeeper() {
-		Date date = new Date();
 		try {
 			semLog.acquire();
-			fwLog.append(String.format("\n%d,%d,%d,%d,%d", date.getTime(), this.id, this.avenidaActual, this.calleActual, this.beepers));
+			Date date = new Date();
+			fwLog.append(String.format("\n%s,%d,%d,%d,%d", dateFormat.format(date), this.id, this.avenidaActual, this.calleActual, this.beepers));
 			fwLog.flush();
 		} catch (IOException e) {
 			System.out.println(e.toString());
@@ -168,10 +220,10 @@ public class Minero extends AugmentedRobot implements Directions {
 
 	@Override
 	public void putBeeper() {
-		Date date = new Date();
 		try {
 			semLog.acquire();
-			fwLog.append(String.format("\n%d,%d,%d,%d,%d", date.getTime(), this.id, this.avenidaActual, this.calleActual, this.beepers));
+			Date date = new Date();
+			fwLog.append(String.format("\n%s,%d,%d,%d,%d", dateFormat.format(date), this.id, this.avenidaActual, this.calleActual, this.beepers));
 			fwLog.flush();
 		} catch (IOException e) {
 			System.out.println(e.toString());
@@ -183,6 +235,56 @@ public class Minero extends AugmentedRobot implements Directions {
 		}
 	}
 
+	public void registrarRobot(){
+		try {
+		   semRob.acquire();
+		   fwRob.append(String.format("\n%d,%d,%b,%d,%d,%d,%d",
+									  tipoRobot, id, encendido,
+									  avenidaInicial, calleInicial,
+									  avenidaActual, calleActual));
+		   fwRob.flush();
+	   } catch (IOException | InterruptedException e) {
+		   e.printStackTrace();
+	   } finally {
+		   semRob.release();
+	   }
+   }
+
+	public static void logStatic() {
+		try {
+			semStatic.acquire();
+			Date date = new Date();
+			fwStatic.append(String.format(
+				"\n%s, %b, %b, %b, %b, %b, %b, %b, %b, %b, %b, %d, %d, %d, %d, %d, %d, %d", 
+				dateFormat.format(date),
+				minaVacia,
+				debugHabilitado,
+				ejecutarLog, 
+				encontroVeta,
+				extraccionCompleta,
+				fondoVeta,
+				inicioExtraccion,
+				inicioTransporte,
+				salidaExtractores,
+				salidaTrenes,
+				bodegaEnUso,
+				cantidadMineros,
+				cantidadTrenes,
+				cantidadExtractores,
+				minerosSalida,
+				beepersExtraidos,
+				trenesSalida
+			));
+			fwStatic.flush();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			semStatic.release();
+		}
+	}
+	
 	// Determine if the new position that will try to occupate is free and move to
 	// it
 	private void mover() {
@@ -295,6 +397,8 @@ public class Minero extends AugmentedRobot implements Directions {
 		if (tipoRobot == TIPO_MINERO) {
 			if (calleActual == CALLE_MINERO && avenidaActual == 1)
 				minerosSalida++;
+				Minero.logStatic();
+				
 			if (minerosSalida == cantidadMineros) {
 				try {
 					ejecutarLog = (debugHabilitado) ? logMensaje("Solo el último minero puede activar los trenes")
@@ -312,6 +416,7 @@ public class Minero extends AugmentedRobot implements Directions {
 		if (tipoRobot == TIPO_TREN) {
 			if (calleActual == CALLE_TREN && avenidaActual == 1)
 				trenesSalida++;
+				Minero.logStatic();
 			if (trenesSalida == cantidadTrenes) {
 				try {
 					ejecutarLog = (debugHabilitado) ? logMensaje("Solo el último tren puede activar los extractores")
@@ -361,6 +466,7 @@ public class Minero extends AugmentedRobot implements Directions {
 		} else {
 			ejecutarLog = (debugHabilitado) ? logMensaje("Primer minero, encontré la veta") : false;
 			encontroVeta = true;
+			Minero.logStatic();
 			mover();
 		}
 	}
@@ -448,6 +554,7 @@ public class Minero extends AugmentedRobot implements Directions {
 			arr_bodegas[bodegaEnUso]++;
 			if (arr_bodegas[bodegaEnUso] == BEEPERS_POR_BODEGA) {
 				bodegaEnUso++;
+				Minero.logStatic();
 				ejecutarLog = (debugHabilitado) ? logMensaje("Cambio a la bodega " + bodegaEnUso) : false;
 				mover();
 			}
@@ -503,6 +610,7 @@ public class Minero extends AugmentedRobot implements Directions {
 		// allows all miners and trains to go home
 		if (minaVacia && beepers == 0) {
 			extraccionCompleta = true;
+			Minero.logStatic();
 			ejecutarLog = (debugHabilitado) ? logMensaje("Extraccion completa. Todos regresan a casa.") : false;
 			while (sem_mineros.availablePermits() <= (cantidadMineros - 1))
 				sem_mineros.release();
@@ -523,6 +631,7 @@ public class Minero extends AugmentedRobot implements Directions {
 			pickBeeper();
 			beepers++;
 			beepersExtraidos--;
+			Minero.logStatic();
 		}
 		// Go to the delivery point
 		turnRight();
@@ -533,6 +642,7 @@ public class Minero extends AugmentedRobot implements Directions {
 					? logMensaje("El primer tren llega con Beepers, se despiertan los Extractores.")
 					: false;
 			inicioTransporte = true;
+			Minero.logStatic();
 			sem_extraccion.release();
 		}
 		// Delivers all beepers that it has in the bag...
@@ -607,6 +717,7 @@ public class Minero extends AugmentedRobot implements Directions {
 					// ... yes! Empty vein...
 					ejecutarLog = (debugHabilitado) ? logMensaje("Si") : false;
 					fondoVeta = true;
+					Minero.logStatic();
 				}
 			}
 			// Go back to the vein delivery point
@@ -633,6 +744,7 @@ public class Minero extends AugmentedRobot implements Directions {
 			if (!inicioExtraccion && beepersExtraidos >= BEEPERS_TREN) {
 				ejecutarLog = (debugHabilitado) ? logMensaje("Notifica que si inició") : false;
 				inicioExtraccion = true;
+				Minero.logStatic();
 				ejecutarLog = (debugHabilitado)
 						? logMensaje("" + sem_trenInicioProceso.availablePermits() + " <= " + (cantidadTrenes - 1))
 						: false;
@@ -644,6 +756,7 @@ public class Minero extends AugmentedRobot implements Directions {
 			if (fondoVeta) {
 				ejecutarLog = (debugHabilitado) ? logMensaje("Si --> mina vacia") : false;
 				minaVacia = true;
+				Minero.logStatic();
 			}
 			ejecutarLog = (debugHabilitado) ? logMensaje("Descargar") : false;
 			// Unload beepers in the vein delivery point
@@ -704,6 +817,7 @@ public class Minero extends AugmentedRobot implements Directions {
 		while (anyBeepersInBeeperBag()) {
 			putBeeper();
 			beepersExtraidos++;
+			Minero.logStatic();
 		}
 		ejecutarLog = (debugHabilitado)
 				? logMensaje("Termine descarga. Si hay más de " + BEEPERS_TREN
@@ -724,6 +838,7 @@ public class Minero extends AugmentedRobot implements Directions {
 			// Extractors releases locks from Miners and Trains to leave the Mine
 			case 3:
 				extraccionCompleta = true;
+				Minero.logStatic();
 				ejecutarLog = (debugHabilitado) ? logMensaje("Libero robots y voy a casa.") : false;
 				while (sem_mineros.availablePermits() <= (cantidadMineros - 1))
 					sem_mineros.release();
@@ -775,6 +890,44 @@ public class Minero extends AugmentedRobot implements Directions {
 		turnAround();
 		ejecutarLog = (debugHabilitado) ? logMensaje("Hora de dormir. Dulces sueños.") : false;
 		turnOff();
+		encendido = false;
+		try {
+            semRob.acquire();
+
+            // Leer todo el archivo y almacenar en memoria
+            List<String> lines = new ArrayList<>();
+            BufferedReader reader = new BufferedReader(new FileReader("data/robot.csv"));
+            String line = reader.readLine(); // Leer la primera línea de encabezado
+            if (line != null) {
+                lines.add(line); // Agregar la línea de encabezado a la lista de líneas
+            }
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length > 1 && Integer.parseInt(parts[1]) == this.id) {
+                    // Actualizar la línea correspondiente al robot
+                    line = String.format("%d,%d,%b,%d,%d,%d,%d",
+                                         tipoRobot, id, encendido,
+                                         avenidaInicial, calleInicial,
+                                         avenidaActual, calleActual);
+                }
+                lines.add(line);
+            }
+            reader.close();
+
+            // Escribir de nuevo el archivo actualizado
+            fwRob = new FileWriter("data/robot.csv", false); // Sobrescribir el archivo
+            BufferedWriter writer = new BufferedWriter(fwRob);
+            for (String l : lines) {
+                writer.write(l);
+                writer.newLine();
+            }
+            writer.flush();
+            writer.close();
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            semRob.release();
+        }
 	}
 
 	// Moves to the Train dropoff point when exit.
@@ -891,6 +1044,7 @@ public class Minero extends AugmentedRobot implements Directions {
 				}
 			}
 		}
+		Minero.logStatic();
 		if (debugHabilitado)
 			System.out.println("Debug Habilitado.");
 	}
@@ -915,12 +1069,17 @@ public class Minero extends AugmentedRobot implements Directions {
 		Minero.sem_trenInicioProceso = new Semaphore(0);
 		Minero.sem_trenSalida = new Semaphore(0);
 
-		semLog = new Semaphore(1);
-		try  {
-			Minero.fwLog = new FileWriter("data/log-eventos.csv", true);
-		} catch (IOException e) {
-			e.printStackTrace();
-		};
+        try {
+            fwLog = new FileWriter("data/log-eventos.csv", true);
+            semLog = new Semaphore(1);
+            fwRob = new FileWriter("data/robot.csv", true);
+            semRob = new Semaphore(1);
+			fwStatic = new FileWriter("data/variables-estaticas.csv", true);
+			semStatic = new Semaphore(1);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+		Minero.logStatic();
 	}
 
 	// Setup Karel World
